@@ -70,22 +70,33 @@ app.get("/health", async (_req, res) => {
 app.post("/webhook", async (req, res) => {
   try {
     const up = req.body?.uplink_message;
-    const devEui = normalizarDevEui(req.body?.end_device_ids?.dev_eui);
-
     if (!up?.decoded_payload) {
       return res.status(400).json({ error: "Payload invalido" });
     }
-    if (!devEui) {
-      return res.status(400).json({ error: "Falta dev_eui en el webhook" });
-    }
+
+    const devEui =
+      (req.body?.end_device_ids?.dev_eui ||
+       req.body?.end_device_ids?.device_id ||
+       "")
+      .toString()
+      .toUpperCase();
+
+    // Si quieres exigir dev_eui registrado:
+    if (!devEui) return res.status(400).json({ error: "Falta dev_eui en el webhook" });
 
     const { temperatura, humedad, ith } = up.decoded_payload;
-    if (!lecturaValida(temperatura, humedad, ith)) {
-      return res.status(422).json({ error: "Lectura fuera de rango o no numérica" });
+
+    // Buscar el sensor por dev_eui
+    const [rows] = await pool.query(
+      "SELECT id_sensor FROM sensores WHERE dev_eui = ? LIMIT 1",
+      [devEui]
+    );
+    if (rows.length === 0) {
+      return res.status(400).json({ error: `dev_eui no registrado: ${devEui}` });
     }
+    const idSensor = rows[0].id_sensor;
 
-    const idSensor = await getOrCreateSensorByDevEui(devEui);
-
+    // Insertar medición vinculada
     await pool.query(
       "INSERT INTO mediciones (id_sensor, temperatura, humedad, ith) VALUES (?, ?, ?, ?)",
       [idSensor, temperatura, humedad, ith]
@@ -94,10 +105,11 @@ app.post("/webhook", async (req, res) => {
     console.log("✅ Medición guardada", { devEui, idSensor, temperatura, humedad, ith });
     res.send("OK");
   } catch (err) {
-    console.error("❌ Error insertando mediciones:", err);
+    console.error("❌ Error /webhook:", err);
     res.status(500).send("Error en base de datos");
   }
 });
+
 
 // --- Altas de catálogo ---
 app.post("/granjas", async (req, res) => {
@@ -137,25 +149,25 @@ app.post("/usuarios", async (req, res) => {
 
 app.post("/sensores", async (req, res) => {
   try {
-    const { nombre_sensor, id_granja, dev_eui } = req.body || {};
-    if (!nombre_sensor) {
-      return res.status(400).send("Falta nombre_sensor");
+    const { nombre_sensor, id_granja, dev_eui } = req.body;
+    if (!nombre_sensor || !id_granja) {
+      return res.status(400).send("Faltan datos del sensor");
     }
-    // dev_eui es opcional, pero si viene lo normalizamos
-    const devEui = normalizarDevEui(dev_eui);
+
+    const dev = dev_eui ? String(dev_eui).toUpperCase() : null;
 
     const [result] = await pool.query(
       "INSERT INTO sensores (nombre_sensor, id_granja, dev_eui) VALUES (?, ?, ?)",
-      [nombre_sensor, id_granja ?? null, devEui ?? null]
+      [nombre_sensor, id_granja, dev]
     );
 
     res.status(201).json({ id_sensor: result.insertId, mensaje: "Sensor guardado" });
   } catch (err) {
-    // Si dev_eui duplicado (UNIQUE), MySQL lanzará error
     console.error("❌ Error insertando sensor:", err);
     res.status(500).send("Error en base de datos");
   }
 });
+
 
 // --- Lecturas ---
 // GET /mediciones -> última global o filtrada por dev_eui o id_sensor
