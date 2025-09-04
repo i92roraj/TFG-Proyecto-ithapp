@@ -22,6 +22,9 @@ const pool = mysql.createPool({
   connectionLimit: 10,
 });
 
+let lastDevEui = null;
+
+
 // 4) Salud
 app.get("/health", async (_req, res) => {
   try {
@@ -37,24 +40,38 @@ app.get("/health", async (_req, res) => {
 
 // 5) Endpoints
 
-// TTN webhook → inserta mediciones
+// TTN webhook → inserta mediciones y cachea el DEV_EUI
 app.post("/webhook", async (req, res) => {
   try {
+    // 🟣 cachear dev_eui en memoria (no persiste si reinicias el server)
+    const devEui = req.body?.end_device_ids?.dev_eui
+                || req.body?.end_device_ids?.device_id
+                || null;
+    if (devEui) lastDevEui = devEui;
+
     const uplink = req.body.uplink_message;
     if (!uplink?.decoded_payload) {
       return res.status(400).send("Payload invalido");
     }
 
     const { temperatura, humedad, ith } = uplink.decoded_payload;
-    const sql = "INSERT INTO mediciones (temperatura, humedad, ith) VALUES (?, ?, ?)";
-    await pool.query(sql, [temperatura, humedad, ith]);
+    await pool.query(
+      "INSERT INTO mediciones (temperatura, humedad, ith) VALUES (?, ?, ?)",
+      [temperatura, humedad, ith]
+    );
 
-    console.log("✅ Datos recibidos:", { temperatura, humedad, ith });
+    console.log("✅ Datos recibidos:", { temperatura, humedad, ith, devEui });
     res.send("OK");
   } catch (err) {
     console.error("❌ Error insertando mediciones:", err);
     res.status(500).send("Error en base de datos");
   }
+});
+
+// Endpoint simple para la app
+app.get("/dev-eui-ultimo", (_req, res) => {
+  if (!lastDevEui) return res.status(404).json({ error: "sin_dev_eui" });
+  res.json({ dev_eui: lastDevEui });
 });
 
 // Granja
