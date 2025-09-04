@@ -204,6 +204,22 @@ app.get("/mediciones", async (req, res) => {
   }
 });
 
+app.get('/api/dev-eui-ultimo', async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT dev_eui
+         FROM sensores
+         WHERE dev_eui IS NOT NULL
+         ORDER BY updated_at DESC
+         LIMIT 1`
+    );
+    if (!rows.length) return res.status(404).json({error:'sin_dev_eui'});
+    res.json({ dev_eui: rows[0].dev_eui });
+  } catch (e) {
+    console.error(e); res.status(500).json({error:'db_error'});
+  }
+});
+
 // 6) Iniciar (sin ngrok)
 app.listen(port, () => {
   console.log(`🚀 API escuchando en puerto ${port}`);
