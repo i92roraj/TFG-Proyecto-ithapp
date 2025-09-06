@@ -74,6 +74,36 @@ app.get("/dev-eui-ultimo", (_req, res) => {
   res.json({ dev_eui: lastDevEui });
 });
 
+app.get('/api/dev-eui-ultimo', async (_req, res) => {
+  const q1 = `
+    SELECT dev_eui
+    FROM sensores
+    WHERE dev_eui IS NOT NULL AND dev_eui <> ''
+    ORDER BY updated_at DESC, id_sensor DESC
+    LIMIT 1`;
+  const q2 = `
+    SELECT dev_eui
+    FROM sensores
+    WHERE dev_eui IS NOT NULL AND dev_eui <> ''
+    ORDER BY id_sensor DESC
+    LIMIT 1`;
+  try {
+    const [rows] = await pool.query(q1);
+    if (!rows.length) return res.status(404).json({ error: 'sin_dev_eui' });
+    res.json({ dev_eui: rows[0].dev_eui });
+  } catch (e) {
+    // Si 'updated_at' no existe, probamos sin ella
+    if (e.code === 'ER_BAD_FIELD_ERROR') {
+      const [rows] = await pool.query(q2);
+      if (!rows.length) return res.status(404).json({ error: 'sin_dev_eui' });
+      return res.json({ dev_eui: rows[0].dev_eui });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+
 // Granja
 app.post("/granjas", async (req, res) => {
   try {
