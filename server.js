@@ -147,6 +147,73 @@ app.get("/mediciones", async (_req, res) => {
   }
 });
 
+// PUT /api/sensores/actualizar
+app.put('/api/sensores/actualizar', async (req, res) => {
+  const {
+    id_sensor,          // opcional pero recomendado
+    dev_eui,            // opcional; si existe actualiza por EUI
+    modelo, area, zona, sala,
+    modo,               // 'auto' | 'manual'
+    umbral_ith,         // int o null
+    dev_id              // opcional (TTN device_id)
+  } = req.body;
+
+  if (!id_sensor && !dev_eui) {
+    return res.status(400).json({ error: 'falta_id_o_dev_eui' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Construye el WHERE dinámico
+    let where = '';
+    let whereParam;
+    if (id_sensor) { where = 'id_sensor = ?'; whereParam = id_sensor; }
+    else           { where = 'dev_eui   = ?'; whereParam = dev_eui;  }
+
+    // Actualiza campos (COALESCE = sólo pisa si viene valor)
+    const [r1] = await conn.query(
+      `UPDATE sensores
+         SET modelo     = COALESCE(?, modelo),
+             area       = COALESCE(?, area),
+             zona       = COALESCE(?, zona),
+             sala       = COALESCE(?, sala),
+             modo       = COALESCE(?, modo),
+             umbral_ith = ?,
+             dev_id     = COALESCE(?, dev_id),
+             updated_at = NOW()
+       WHERE ${where}`,
+      [modelo ?? null, area ?? null, zona ?? null, sala ?? null,
+       modo ?? null, (umbral_ith ?? null), dev_id ?? null, whereParam]
+    );
+
+    // Si envías id_sensor y dev_eui, vincula el dev_eui si aún no estaba
+    if (id_sensor && dev_eui) {
+      await conn.query(
+        `UPDATE sensores
+           SET dev_eui = ?
+         WHERE id_sensor = ?
+           AND (dev_eui IS NULL OR dev_eui = '')`,
+        [dev_eui, id_sensor]
+      );
+    }
+
+    await conn.commit();
+    res.json({ ok: true, affected: r1.affectedRows });
+  } catch (e) {
+    await conn.rollback();
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'dev_eui_duplicado' });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'db_error' });
+  } finally {
+    conn.release();
+  }
+});
+
+
 // 6) Iniciar (sin ngrok)
 app.listen(port, () => {
   console.log(`🚀 API escuchando en puerto ${port}`);
