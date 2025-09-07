@@ -177,6 +177,72 @@ app.get("/mediciones", async (_req, res) => {
   }
 });
 
+// POST /api/ttn/downlink  { dev_eui, cmd }
+app.post('/api/downlink', async (req, res) => {
+  try {
+    let { dev_eui, cmd } = req.body || {};
+    if (!dev_eui || !cmd) return res.status(400).json({ error: 'faltan_campos' });
+
+    dev_eui = String(dev_eui).trim().toUpperCase();
+
+    // 1) Buscar app_id y device_id por dev_eui
+    const [rows] = await pool.query(
+      `SELECT app_id, device_id
+         FROM sensores
+        WHERE UPPER(TRIM(dev_eui)) = ?
+        LIMIT 1`,
+      [dev_eui]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'sensor_no_encontrado' });
+
+    const { app_id, device_id } = rows[0];
+    if (!app_id || !device_id) {
+      return res.status(409).json({ error: 'falta_app_o_device_id' });
+    }
+
+    // 2) Preparar petición a TTN v3 (región EU1)
+    const TTN_API_KEY = process.env.TTN_API_KEY; // NNSXS_...
+    if (!TTN_API_KEY) return res.status(500).json({ error: 'ttn_api_key_no_configurada' });
+
+    const url = `https://eu1.cloud.thethings.network/api/v3/as/applications/${app_id}/devices/${device_id}/down/push`;
+
+    // El nodo espera ASCII, TTN exige base64 en frm_payload
+    const frmPayloadB64 = Buffer.from(String(cmd), 'utf8').toString('base64');
+
+    const body = {
+      downlinks: [
+        {
+          f_port: 1,                 // tu nodo usa port 1 (modem.setPort(1))
+          frm_payload: frmPayloadB64,
+          priority: 'NORMAL'
+        }
+      ]
+    };
+
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${TTN_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const text = await r.text();
+    if (!r.ok) {
+      console.error('TTN downlink error', r.status, text);
+      return res.status(502).json({ error: 'ttn_error', status: r.status, detail: text });
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'downlink_error' });
+  }
+});
+
+
+
 // PUT /api/sensores/actualizar
 app.put('/api/sensores/actualizar', async (req, res) => {
   try {
