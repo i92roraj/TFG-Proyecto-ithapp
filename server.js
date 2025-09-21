@@ -165,15 +165,10 @@ app.post("/sensores", async (req, res) => {
   }
 });
 
+// Última medición
 app.get("/mediciones", async (_req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT id, temperatura, humedad, ith,
-             IFNULL(created_at, NOW()) AS fecha
-      FROM mediciones
-      ORDER BY id DESC
-      LIMIT 1
-    `);
+    const [rows] = await pool.query("SELECT * FROM mediciones ORDER BY id DESC LIMIT 1");
     if (rows.length > 0) return res.json(rows[0]);
     res.status(404).send("No hay datos disponibles");
   } catch (err) {
@@ -181,7 +176,6 @@ app.get("/mediciones", async (_req, res) => {
     res.status(500).send("Error en base de datos");
   }
 });
-
 
 const idRe = /^[a-z0-9](?:-?[a-z0-9]){2,}$/;
 
