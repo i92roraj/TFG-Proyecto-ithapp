@@ -274,6 +274,37 @@ app.put('/api/sensores/actualizar', async (req, res) => {
 });
 
 
+
+// === DEMOS DE DOWNLINK (convenience endpoints) ===
+
+// POST /api/downlink/test-auto  { dev_eui }
+app.post('/api/downlink/test-auto', async (req, res) => {
+  const { dev_eui } = req.body || {};
+  if (!dev_eui) return res.status(400).json({ error: 'faltan_campos' });
+  // Reutiliza el handler general
+  req.body = { dev_eui, cmd: 'TEST_AUTO' };
+  return pushDownlinkHandler(req, res);
+});
+
+// POST /api/downlink/offset  { dev_eui, offset, seconds }
+// offset: -40..40, seconds: 1..60
+app.post('/api/downlink/offset', async (req, res) => {
+  const { dev_eui, offset, seconds } = req.body || {};
+  if (dev_eui == null || offset == null) {
+    return res.status(400).json({ error: 'faltan_campos' });
+  }
+  const off = Math.max(-40, Math.min(40, parseInt(offset, 10)));
+  const sec = Math.max(1, Math.min(60, parseInt(seconds || 15, 10)));
+
+  const sign = off >= 0 ? '+' : '';
+  const cmd = off === 0 ? 'OFFSET=0' : `OFFSET=${sign}${off}@${sec}`;
+
+  req.body = { dev_eui, cmd };
+  return pushDownlinkHandler(req, res);
+});
+
+
+
 // 6) Iniciar (sin ngrok)
 app.listen(port, () => {
   console.log(`🚀 API escuchando en puerto ${port}`);
