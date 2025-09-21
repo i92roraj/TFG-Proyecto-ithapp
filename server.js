@@ -6,7 +6,12 @@ const app = express();
 
 // 1) Middleware
 app.use(express.json());
-app.use(cors({ origin: "*" })); // si usas Flutter Web, pon tu dominio en vez de '*'
+app.use(cors({ origin: "*" }));
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  next();
+});
+ // si usas Flutter Web, pon tu dominio en vez de '*'
 
 // 2) Puerto (Railway coloca PORT)
 const port = process.env.PORT || 3000;
@@ -165,13 +170,34 @@ app.post("/sensores", async (req, res) => {
   }
 });
 
-// Última medición
 app.get("/mediciones", async (_req, res) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM mediciones ORDER BY id DESC LIMIT 1");
+    // Intento 1: con created_at si existe
+    const q1 = `
+      SELECT id, temperatura, humedad, ith, created_at AS fecha
+      FROM mediciones
+      ORDER BY id DESC
+      LIMIT 1`;
+    const [rows] = await pool.query(q1);
     if (rows.length > 0) return res.json(rows[0]);
-    res.status(404).send("No hay datos disponibles");
+    return res.status(404).send("No hay datos disponibles");
   } catch (err) {
+    // Si la columna no existe en tu tabla, devolvemos NOW() como fecha
+    if (err.code === 'ER_BAD_FIELD_ERROR') {
+      try {
+        const q2 = `
+          SELECT id, temperatura, humedad, ith, NOW() AS fecha
+          FROM mediciones
+          ORDER BY id DESC
+          LIMIT 1`;
+        const [rows2] = await pool.query(q2);
+        if (rows2.length > 0) return res.json(rows2[0]);
+        return res.status(404).send("No hay datos disponibles");
+      } catch (e2) {
+        console.error("❌ Error al consultar mediciones (fallback):", e2);
+        return res.status(500).send("Error en base de datos");
+      }
+    }
     console.error("❌ Error al consultar mediciones:", err);
     res.status(500).send("Error en base de datos");
   }
