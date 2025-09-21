@@ -165,10 +165,15 @@ app.post("/sensores", async (req, res) => {
   }
 });
 
-// Última medición
 app.get("/mediciones", async (_req, res) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM mediciones ORDER BY id DESC LIMIT 1");
+    const [rows] = await pool.query(`
+      SELECT id, temperatura, humedad, ith,
+             IFNULL(created_at, NOW()) AS fecha
+      FROM mediciones
+      ORDER BY id DESC
+      LIMIT 1
+    `);
     if (rows.length > 0) return res.json(rows[0]);
     res.status(404).send("No hay datos disponibles");
   } catch (err) {
@@ -176,6 +181,7 @@ app.get("/mediciones", async (_req, res) => {
     res.status(500).send("Error en base de datos");
   }
 });
+
 
 const idRe = /^[a-z0-9](?:-?[a-z0-9]){2,}$/;
 
@@ -274,34 +280,26 @@ app.put('/api/sensores/actualizar', async (req, res) => {
 });
 
 
+// GET /api/sensores/by-dev-eui?dev_eui=XXXX
+app.get('/api/sensores/by-dev-eui', async (req, res) => {
+  try {
+    let dev = String(req.query.dev_eui || '').trim().toUpperCase();
+    if (!dev) return res.status(400).json({ error: 'dev_eui_requerido' });
 
-// === DEMOS DE DOWNLINK (convenience endpoints) ===
-
-// POST /api/downlink/test-auto  { dev_eui }
-app.post('/api/downlink/test-auto', async (req, res) => {
-  const { dev_eui } = req.body || {};
-  if (!dev_eui) return res.status(400).json({ error: 'faltan_campos' });
-  // Reutiliza el handler general
-  req.body = { dev_eui, cmd: 'TEST_AUTO' };
-  return pushDownlinkHandler(req, res);
-});
-
-// POST /api/downlink/offset  { dev_eui, offset, seconds }
-// offset: -40..40, seconds: 1..60
-app.post('/api/downlink/offset', async (req, res) => {
-  const { dev_eui, offset, seconds } = req.body || {};
-  if (dev_eui == null || offset == null) {
-    return res.status(400).json({ error: 'faltan_campos' });
+    const [rows] = await pool.query(
+      `SELECT dev_eui, modelo, area, zona, sala, modo, umbral_ith, updated_at
+         FROM sensores
+        WHERE UPPER(TRIM(dev_eui)) = ?
+        LIMIT 1`, [dev]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'sensor_no_encontrado' });
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'db_error' });
   }
-  const off = Math.max(-40, Math.min(40, parseInt(offset, 10)));
-  const sec = Math.max(1, Math.min(60, parseInt(seconds || 15, 10)));
-
-  const sign = off >= 0 ? '+' : '';
-  const cmd = off === 0 ? 'OFFSET=0' : `OFFSET=${sign}${off}@${sec}`;
-
-  req.body = { dev_eui, cmd };
-  return pushDownlinkHandler(req, res);
 });
+
 
 
 
